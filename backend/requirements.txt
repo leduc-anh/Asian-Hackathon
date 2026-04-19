@@ -1,0 +1,6 @@
+fastapi>=0.95
+uvicorn[standard]>=0.22
+pydantic
+SQLAlchemy>=2.0
+asyncpg
+alembic
