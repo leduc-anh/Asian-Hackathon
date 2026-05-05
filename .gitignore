@@ -3,6 +3,9 @@ node_modules/
 __pycache__/
 venv/
 .env
+.env.local
+.env.*.local
+frontend/.env.local
 dist/
 *.pyc
 /.idea
