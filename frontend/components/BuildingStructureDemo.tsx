@@ -1051,99 +1051,74 @@ export function BuildingStructureDemo() {
               const globalWindDeg = env.wind.deg || 180;
               const angleRad = (globalWindDeg % 360) * (Math.PI / 180);
               const baseDirX = -Math.sin(angleRad);
+              // Meteorological wind direction is "from" direction (0° = from North).
+              // Our local Z axis follows Mercator Y (positive toward South), so use +cos.
               const baseDirZ = Math.cos(angleRad);
-              const windSpeedBase = env.wind.speed * 12.0; // Scaled for visual effect
 
               const dt = 0.016;
               for (let i = 0; i < wData.length; i++) {
                 const p = wData[i];
 
-                // 1. Vertical Wind Profile (Power Law)
-                // Represents wind speed increasing with height (urban roughness)
-                const alpha = 0.25;
-                const hRef = 30;
-                const zRel = Math.max(1, p.position.y);
-                const verticalMultiplier = Math.pow(zRel / hRef, alpha);
-                const localWindSpeed = windSpeedBase * verticalMultiplier;
-
-                const U_x = baseDirX * localWindSpeed;
-                const U_z = baseDirZ * localWindSpeed;
+                const U_x = baseDirX * 60;
+                const U_z = baseDirZ * 60;
 
                 let vx = U_x;
                 let vz = U_z;
-                let vy = Math.sin(p.position.x * 0.04 + t * 1.6) * 3.0; // Ambient turbulence
+                let vy = Math.sin(p.position.x * 0.04 + t * 1.6) * 5.0;
 
                 for (const obs of obstacles) {
-                  const dx = p.position.x - obs.x;
-                  const dz = p.position.z - obs.z;
-                  const r2 = dx * dx + dz * dz;
-                  const R = obs.r;
-                  const H = obs.h;
+                  const relX = p.position.x - obs.x;
+                  const relZ = p.position.z - obs.z;
+                  const r2 = relX * relX + relZ * relZ;
+                  const R2 = obs.r * obs.r;
                   const r = Math.sqrt(r2);
 
-                  // Project into wind-aligned coordinates (v = along-wind, u = cross-wind)
-                  const vRel = dx * baseDirX + dz * baseDirZ; 
-                  const uRel = dx * (-baseDirZ) + dz * baseDirX;
+                  if (r2 > 1 && r2 < R2 * 16) {
+                    const U_dot_p = U_x * relX + U_z * relZ;
+                    const term = R2 / (r2 * r2);
+                    vx += term * (r2 * U_x - 2 * U_dot_p * relX);
+                    vz += term * (r2 * U_z - 2 * U_dot_p * relZ);
 
-                  if (r < R * 6) {
-                    // 2. URock/Röckle-inspired Diagnostic Zones
-                    const isBehind = vRel > R * 0.5;
-                    const isBeside = Math.abs(uRel) < R * 1.5;
+                    // Add tangential steering around obstacle to create smoother curved streamlines.
+                    // This makes particles "hug" building edges instead of cutting sharply.
+                    const invR = 1 / Math.max(r, 1e-4);
+                    const nx = relX * invR;
+                    const nz = relZ * invR;
+                    const tx = -nz;
+                    const tz = nx;
+                    const flowSign = Math.sign(U_x * tx + U_z * tz) || 1;
+                    const nearEdge = Math.max(
+                      0,
+                      1 - Math.abs(r - obs.r * 1.05) / (obs.r * 1.6),
+                    );
+                    const swirlStrength = nearEdge * 36;
+                    vx += tx * flowSign * swirlStrength;
+                    vz += tz * flowSign * swirlStrength;
 
-                    if (isBehind && isBeside) {
-                      const cavityLength = H * 1.5;
-                      const wakeLength = H * 5.0;
+                    // Soft radial repulsion avoids particles penetrating buildings,
+                    // but keeps them close enough for "bám sát" visual effect.
+                    const repulse =
+                      Math.max(0, (obs.r * 0.9 - r) / Math.max(obs.r, 1e-4)) *
+                      45;
+                    vx += nx * repulse;
+                    vz += nz * repulse;
 
-                      if (vRel < cavityLength && p.position.y < H * 1.1) {
-                        // Cavity: Recirculation (reverse wind)
-                        vx *= -0.3;
-                        vz *= -0.3;
-                        vy += 4.5; // Updraft in cavity zone
-                      } else if (vRel < wakeLength && p.position.y < H * 1.6) {
-                        // Wake: Velocity deficit
-                        const wakeFactor = 0.35 + 0.45 * (vRel / wakeLength);
-                        vx *= wakeFactor;
-                        vz *= wakeFactor;
-                      }
-                    }
-
-                    // 3. Potential Flow & Steering (Upwind and Near-Side)
-                    if (r < R * 2.5) {
-                      const U_dot_p = U_x * dx + U_z * dz;
-                      const term = (R * R) / (r2 * r2);
-                      vx += term * (r2 * U_x - 2 * U_dot_p * dx) * 0.5;
-                      vz += term * (r2 * U_z - 2 * U_dot_p * dz) * 0.5;
-
-                      // Tangential steering (hugging the edges)
-                      const invR = 1 / Math.max(r, 1e-4);
-                      const nx = dx * invR;
-                      const nz = dz * invR;
-                      const tx = -nz;
-                      const tz = nx;
-                      const flowSign = Math.sign(U_x * tx + U_z * tz) || 1;
-                      const nearEdge = Math.max(0, 1 - Math.abs(r - R * 1.05) / (R * 1.2));
-                      vx += tx * flowSign * nearEdge * 28;
-                      vz += tz * flowSign * nearEdge * 28;
-
-                      // Upwind displacement (pushing up when hitting facade)
-                      if (vRel < 0 && r < R * 1.6 && p.position.y < H) {
-                        const pushUp = Math.abs(vRel / R) * 8.5;
-                        vy += pushUp;
-                      }
-                    }
-
-                    // 4. Collision Avoidance (Physical constraint)
-                    if (r < R * 0.88 && p.position.y < H) {
-                      const nx = dx / r;
-                      const nz = dz / r;
-                      p.position.x = obs.x + nx * R * 0.9;
-                      p.position.z = obs.z + nz * R * 0.9;
-                      vx += nx * 55;
-                      vz += nz * 55;
+                    const distFromCenter = Math.sqrt(r2);
+                    // Updraft only occurs when wind hits building and clambers over it.
+                    // Strongest at building top, fading out above and below.
+                    const heightDiff = p.position.y - obs.h;
+                    if (p.position.y < obs.h + 20) {
+                      const updraftFactor = Math.max(
+                        0,
+                        1.0 - Math.abs(heightDiff) / 40,
+                      );
+                      vy += Math.max(
+                        0,
+                        (obs.r * 2 - distFromCenter) * 2.5 * updraftFactor,
+                      );
                     }
                   }
                 }
-
 
                 // Inertial blending removes jitter and creates smooth, continuous curves.
                 const targetVel = new THREE.Vector3(vx, vy, vz);
