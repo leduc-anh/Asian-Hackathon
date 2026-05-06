@@ -9,33 +9,11 @@ import {
   GLTFLoader,
   type GLTF,
 } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Box, 
-  Upload, 
-  Hexagon, 
-  Wind, 
-  Thermometer, 
-  CloudSun, 
-  CloudRain, 
-  Cloud, 
-  Droplets, 
-  Zap,
-  LayoutGrid,
-  Home,
-  FolderKanban,
-  User,
-  Bell,
-  Search,
-  Settings,
-  HelpCircle,
-  LogOut,
-  MoreVertical,
-  X,
-  Maximize2,
-  Minimize2
-} from "lucide-react";
+
+import { Header } from "@/components/layout";
+import { Sidebar } from "@/components/layout";
+import { PropertyEditorPanel, ModelImportPanel } from "@/components/panels";
+import { WindyOverlay, LoadingOverlay } from "@/components/overlays";
 
 type FeatureCollection = GeoJSON.FeatureCollection<
   GeoJSON.Polygon | GeoJSON.MultiPolygon
@@ -48,7 +26,6 @@ interface EnvData {
   pollution: { pm2_5: number };
 }
 
-
 interface ModelPlacement {
   lng: number;
   lat: number;
@@ -56,7 +33,6 @@ interface ModelPlacement {
   rotation: number;
   scale: number;
 }
-
 
 interface WindParticle3D {
   position: THREE.Vector3;
@@ -67,13 +43,10 @@ interface WindParticle3D {
   maxLife: number;
 }
 
-
-
 const initialData: FeatureCollection = {
   type: "FeatureCollection",
   features: [],
 };
-
 
 const SOURCE_ID = "user-buildings-source";
 const LAYER_ID = "user-buildings-3d";
@@ -127,11 +100,7 @@ const createRoofCollection = (data: FeatureCollection): FeatureCollection => {
   return { type: "FeatureCollection", features: roofFeatures };
 };
 
-
-
 function ringArea(ring: number[][]) {
-
-
   let sum = 0;
   for (let i = 0; i < ring.length - 1; i += 1) {
     const [x1, y1] = ring[i];
@@ -342,7 +311,7 @@ export function BuildingStructureDemo() {
       }
       const point = marker.getLngLat();
       // Only update placement data. The render loop reads this every frame
-      // and syncs the model transform atomically — avoids flicker from
+      // and syncs the model transform atomically to avoid flicker from
       // calling setLngLat() or triggerRepaint() during active drag.
       placement.lng = point.lng;
       placement.lat = point.lat;
@@ -361,7 +330,7 @@ export function BuildingStructureDemo() {
     modelMarkerRef.current = marker;
   };
 
-  // ── AQI heatmap: draw PM2.5 concentration cloud around a location ──
+  // AQI heatmap: draw PM2.5 concentration cloud around a location
   const updateAQIHeatmap = (lng: number, lat: number, pm25: number) => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
@@ -437,7 +406,7 @@ export function BuildingStructureDemo() {
     }
   };
 
-  // ── Fetch env data from backend, then update map + particles ──
+  // Fetch env data from backend, then update map + particles
   const fetchEnvData = async (lat: number, lng: number) => {
     setIsLoadingEnv(true);
     try {
@@ -454,7 +423,7 @@ export function BuildingStructureDemo() {
     }
   };
 
-  // ── OWM tile key (free tier, covers all of Vietnam) ──
+  // OWM tile key (free tier, covers all of Vietnam)
   const OWM_KEY =
     process.env.NEXT_PUBLIC_OPENWEATHERMAP_KEY ??
     "ce6c5aeeba2c0ced069fb23e43e38a56";
@@ -753,7 +722,7 @@ export function BuildingStructureDemo() {
       scene.add(directionalLight);
       scene.add(fillLight);
 
-      // ── SETUP 3D WIND PARTICLES ──
+      // SETUP 3D WIND PARTICLES
       const windCount = 1000;
       const windTrailLength = 8;
       // Use a sphere that we will scale into a soft ellipsoid, avoiding the "rigid stick" look
@@ -826,7 +795,7 @@ export function BuildingStructureDemo() {
           });
           renderer.autoClear = false;
           // Fix: Three.js r152+ defaults to LinearSRGBColorSpace.
-          // GLTF textures are sRGB-encoded — without this setting,
+          // GLTF textures are sRGB-encoded; without this setting,
           // orange textures appear as dark brown (gamma not applied).
           renderer.outputColorSpace = THREE.SRGBColorSpace;
           renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -876,7 +845,7 @@ export function BuildingStructureDemo() {
             Math.PI / 2,
           );
 
-          // l = translate to geo position × rotateZ × scale(s, -s, s) × rotateX(PI/2)
+          // l = translate to geo position x rotateZ x scale(s, -s, s) x rotateX(PI/2)
           const l = new THREE.Matrix4()
             .makeTranslation(
               windCenterMerc.x,
@@ -921,7 +890,7 @@ export function BuildingStructureDemo() {
           // Do not force repaint unconditionally.
           // Continuous repaint here can saturate CPU/GPU and make UI feel unclickable.
 
-          // ── UPDATE 3D WIND PARTICLES ──
+          // UPDATE 3D WIND PARTICLES
           const wMesh = windMeshRef.current;
           const wTrail = windTrailRef.current;
           const wData = windDataRef.current;
@@ -1055,16 +1024,52 @@ export function BuildingStructureDemo() {
               // Our local Z axis follows Mercator Y (positive toward South), so use +cos.
               const baseDirZ = Math.cos(angleRad);
 
+              // ── §4.1 Atmospheric Boundary Layer (ABL) Profile ──
+              // V_H = V_ref × (H / δ)^a
+              // Urban terrain: δ = 370m, a = 0.22 (per Vietnamese urban planning standards)
+              const ABL_DELTA = 370; // boundary layer thickness (m) for urban terrain
+              const ABL_ALPHA = 0.22; // power-law exponent for urban terrain
+              const V_REF = 60; // reference free-stream speed at boundary layer top
+              const H_REF = 10; // meteorological station reference height (m)
+
+              // ── §4.2 Wind Angle Discount Factors from 43 CFD scenarios ──
+              // Interpolated from: 0°→0%, 22.5°→38.5%, 45°→63.6%, 67.5°→90.9%, 90°→100%
+              const ANGLE_BREAKPOINTS = [0, 22.5, 45, 67.5, 90];
+              const ANGLE_FACTORS = [0, 0.385, 0.636, 0.909, 1.0];
+              const lerpAngleFactor = (angleDeg: number): number => {
+                const a = Math.min(90, Math.abs(angleDeg % 180));
+                for (let j = 1; j < ANGLE_BREAKPOINTS.length; j++) {
+                  if (a <= ANGLE_BREAKPOINTS[j]) {
+                    const t0 = ANGLE_BREAKPOINTS[j - 1];
+                    const t1 = ANGLE_BREAKPOINTS[j];
+                    const f0 = ANGLE_FACTORS[j - 1];
+                    const f1 = ANGLE_FACTORS[j];
+                    return f0 + (f1 - f0) * ((a - t0) / (t1 - t0));
+                  }
+                }
+                return 1.0;
+              };
+
               const dt = 0.016;
               for (let i = 0; i < wData.length; i++) {
                 const p = wData[i];
 
-                const U_x = baseDirX * 60;
-                const U_z = baseDirZ * 60;
+                // ── ABL: wind speed varies with height ──
+                // Clamp height to [1, ABL_DELTA] to avoid zero/negative values
+                const particleH = Math.max(
+                  1,
+                  Math.min(p.position.y, ABL_DELTA),
+                );
+                const ablFactor = Math.pow(particleH / ABL_DELTA, ABL_ALPHA);
+                const U_mag = V_REF * ablFactor;
+
+                const U_x = baseDirX * U_mag;
+                const U_z = baseDirZ * U_mag;
 
                 let vx = U_x;
                 let vz = U_z;
-                let vy = Math.sin(p.position.x * 0.04 + t * 1.6) * 5.0;
+                let vy =
+                  Math.sin(p.position.x * 0.04 + t * 1.6) * 5.0 * ablFactor;
 
                 for (const obs of obstacles) {
                   const relX = p.position.x - obs.x;
@@ -1096,7 +1101,7 @@ export function BuildingStructureDemo() {
                     vz += tz * flowSign * swirlStrength;
 
                     // Soft radial repulsion avoids particles penetrating buildings,
-                    // but keeps them close enough for "bám sát" visual effect.
+                    // but keeps them close enough for visual "bám sát" effect.
                     const repulse =
                       Math.max(0, (obs.r * 0.9 - r) / Math.max(obs.r, 1e-4)) *
                       45;
@@ -1116,6 +1121,62 @@ export function BuildingStructureDemo() {
                         0,
                         (obs.r * 2 - distFromCenter) * 2.5 * updraftFactor,
                       );
+                    }
+
+                    // ── §4.2 Wake Recirculation Zone ──
+                    // L (wake length) ∝ building height × width, with angle discount.
+                    // Compute angle between wind direction and obstacle-to-particle vector.
+                    const windAngleToObs =
+                      Math.atan2(
+                        U_x * nz - U_z * nx, // cross product (sin of angle)
+                        U_x * nx + U_z * nz, // dot product (cos of angle)
+                      ) *
+                      (180 / Math.PI);
+                    const wakeAngleFactor = lerpAngleFactor(
+                      Math.abs(windAngleToObs),
+                    );
+
+                    // Wake length scales with building dimensions and angle factor
+                    // Using obs.h for height, obs.r*2 as approximate width
+                    const wakeL = obs.h * 0.8 * wakeAngleFactor;
+                    const wakeW = obs.r * 1.5 * wakeAngleFactor;
+
+                    // Check if particle is in the downwind wake zone
+                    // Project particle position onto wind direction to find downwind distance
+                    const downwindDist = -(relX * baseDirX + relZ * baseDirZ);
+                    const crosswindDist = Math.abs(
+                      -relX * baseDirZ + relZ * baseDirX,
+                    );
+
+                    if (
+                      downwindDist > 0 &&
+                      downwindDist < wakeL &&
+                      crosswindDist < wakeW
+                    ) {
+                      // Inside wake zone: create low-velocity recirculation
+                      const wakeFade = 1 - downwindDist / wakeL;
+                      const wakeIntensity = wakeFade * 0.7;
+
+                      // Reduce forward velocity (deceleration in wake)
+                      vx *= 1 - wakeIntensity * 0.8;
+                      vz *= 1 - wakeIntensity * 0.8;
+
+                      // Add reverse recirculation component (vortex behind building)
+                      vx -= baseDirX * V_REF * wakeIntensity * 0.3;
+                      vz -= baseDirZ * V_REF * wakeIntensity * 0.3;
+
+                      // Add lateral turbulent fluctuation in wake
+                      const turbFreq =
+                        t * 2.5 + p.position.x * 0.05 + p.position.z * 0.05;
+                      const turbulence =
+                        Math.sin(turbFreq) * V_REF * wakeIntensity * 0.15;
+                      vx += -baseDirZ * turbulence;
+                      vz += baseDirX * turbulence;
+
+                      // Slight downwash in the near-wake region
+                      if (p.position.y > 2) {
+                        vy -= wakeIntensity * 8.0 * wakeFade;
+                      }
                     }
                   }
                 }
@@ -1505,7 +1566,7 @@ export function BuildingStructureDemo() {
       model.traverse((child: THREE.Object3D) => {
         const mesh = child as THREE.Mesh;
         if (mesh.isMesh) {
-          // No shadows — no shadow-casting lights configured.
+          // No shadows - no shadow-casting lights configured.
           mesh.castShadow = false;
           mesh.receiveShadow = false;
           const materials = Array.isArray(mesh.material)
@@ -1525,7 +1586,7 @@ export function BuildingStructureDemo() {
         }
       });
 
-      // Model stays at scene origin — the render callback encodes all
+      // Model stays at scene origin; the render callback encodes all
       // transform (position / scale / rotation) into camera.projectionMatrix.
       model.position.set(0, 0, 0);
       model.scale.set(1, 1, 1);
@@ -1771,481 +1832,83 @@ export function BuildingStructureDemo() {
 
   return (
     <section className="relative h-screen w-full bg-black overflow-hidden font-sans antialiased text-white">
-      {/* Header */}
-      <header className="fixed top-0 left-0 right-0 h-14 z-50 bg-black/90 backdrop-blur-xl border-b border-white/10 px-4 flex items-center justify-between shadow-2xl">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/20 flex items-center justify-center group hover:border-white/40 transition-all duration-300">
-            <Box className="w-4 h-4 text-white group-hover:scale-110 transition-transform" strokeWidth={2} />
-          </div>
-          <div>
-            <h1 className="text-sm font-bold text-white tracking-tight leading-none mb-1">AeroTwin</h1>
-            <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] font-bold leading-none">Urban Intelligence</p>
-          </div>
-        </div>
+      <Header />
 
-        <nav className="hidden md:flex items-center gap-1 bg-white/5 p-1 rounded-full border border-white/10">
-          <button className="flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold text-white bg-white/10 shadow-sm border border-white/5 transition-all">
-            <Home className="w-3.5 h-3.5" strokeWidth={2} />
-            Trang chủ
-          </button>
-          <button className="flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold text-white/60 hover:text-white hover:bg-white/5 transition-all">
-            <FolderKanban className="w-3.5 h-3.5" strokeWidth={2} />
-            Dự án
-          </button>
-        </nav>
-
-        <div className="flex items-center gap-3">
-          <div className="hidden lg:flex items-center bg-white/5 border border-white/10 rounded-full px-3 py-1.5 gap-2 mr-2">
-            <Search className="w-3.5 h-3.5 text-white/40" />
-            <span className="text-[11px] text-white/40 font-medium">Tìm kiếm dữ liệu...</span>
-          </div>
-          
-          <button className="p-2 text-white/60 hover:text-white transition-colors relative group">
-            <Bell className="w-5 h-5" strokeWidth={1.5} />
-            <span className="absolute top-2.5 right-2.5 w-1.5 h-1.5 bg-cyan-400 rounded-full border border-black group-hover:scale-125 transition-transform" />
-          </button>
-          
-          <div className="h-6 w-[1px] bg-white/10 mx-1" />
-          
-          <div className="flex items-center gap-3 pl-1">
-            <div className="text-right hidden sm:block">
-              <p className="text-xs font-bold text-white leading-none mb-0.5">Tonny</p>
-              <p className="text-[10px] text-white/30 font-medium leading-none tracking-wide">Administrator</p>
-            </div>
-            <div className="w-9 h-9 rounded-full border border-white/20 bg-gradient-to-tr from-zinc-800 to-zinc-950 flex items-center justify-center overflow-hidden hover:border-white/40 transition-colors cursor-pointer">
-               <User className="w-5 h-5 text-white/60" />
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Sidebar */}
-      <aside 
-        className={`fixed left-0 top-14 bottom-0 z-40 flex flex-col bg-black border-r border-white/10 shadow-[20px_0_40px_rgba(0,0,0,0.4)] transition-all duration-500 cubic-bezier(0.4, 0, 0.2, 1) ${
-          isSidebarCollapsed ? "w-16" : "w-[300px]"
-        }`}
-      >
-        <div className="flex-1 overflow-y-auto py-6 scrollbar-hide">
-          <div className="px-3 space-y-6">
-            
-            {/* Project Info Section */}
-            {!isSidebarCollapsed && (
-              <div className="px-2 mb-6">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-2">Dự án hiện tại</p>
-                <div className="p-3 rounded-xl bg-white/5 border border-white/10 group hover:border-white/20 transition-all cursor-pointer">
-                  <div className="flex items-center justify-between mb-1">
-                    <h3 className="text-sm font-bold text-white group-hover:text-cyan-400 transition-colors">TP.HCM Digital Twin</h3>
-                    <MoreVertical className="w-4 h-4 text-white/30" />
-                  </div>
-                  <p className="text-[11px] text-white/40 font-medium leading-relaxed">{statusMessage}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Core Controls */}
-            <div className="space-y-1">
-              {!isSidebarCollapsed && <p className="px-2 text-[10px] font-bold uppercase tracking-widest text-white/30 mb-2">Thao tác</p>}
-              
-              <button
-                type="button"
-                onClick={() => setStatusMessage("Chuẩn bị import dữ liệu dự án...")}
-                className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group ${
-                  isSidebarCollapsed ? "justify-center" : "gap-3 px-3 hover:bg-white/5"
-                }`}
-                title={isSidebarCollapsed ? "Import dữ liệu" : ""}
-              >
-                <Upload className="w-5 h-5 text-white/60 group-hover:text-white group-hover:scale-110 transition-all" strokeWidth={1.5} />
-                {!isSidebarCollapsed && (
-                  <span className="text-sm font-semibold text-white/70 group-hover:text-white">Import dữ liệu</span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={startPolygonDraw}
-                className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group ${
-                  isSidebarCollapsed ? "justify-center" : "gap-3 px-3 hover:bg-white/5"
-                }`}
-                title={isSidebarCollapsed ? "Vẽ polygon" : ""}
-              >
-                <Hexagon className="w-5 h-5 text-white/60 group-hover:text-white group-hover:scale-110 transition-all" strokeWidth={1.5} />
-                {!isSidebarCollapsed && (
-                  <span className="text-sm font-semibold text-white/70 group-hover:text-white">Vẽ polygon</span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setOperationMode("import")}
-                className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group ${
-                  operationMode === "import" 
-                    ? "bg-white/10 text-white" 
-                    : "text-white/60 hover:bg-white/5 hover:text-white"
-                } ${isSidebarCollapsed ? "justify-center" : "gap-3 px-3"}`}
-                title={isSidebarCollapsed ? "Import mô hình" : ""}
-              >
-                <Box className={`w-5 h-5 ${operationMode === "import" ? "text-white" : "text-white/60 group-hover:text-white group-hover:scale-110 transition-all"}`} strokeWidth={1.5} />
-                {!isSidebarCollapsed && (
-                  <span className="text-sm font-semibold">Import mô hình 3D</span>
-                )}
-              </button>
-            </div>
-
-            {/* Environmental Data Section */}
-            <div className="space-y-1">
-              {!isSidebarCollapsed && <p className="px-2 text-[10px] font-bold uppercase tracking-widest text-white/30 mb-2">Môi trường</p>}
-              
-              <button
-                type="button"
-                onClick={() => switchEnvTab(activeEnvTab === "wind" ? null : "wind")}
-                className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group ${
-                  activeEnvTab === "wind" ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 shadow-[0_0_20px_rgba(34,211,238,0.1)]" : "text-white/60 hover:bg-white/5 hover:text-white"
-                } ${isSidebarCollapsed ? "justify-center" : "gap-3 px-3"}`}
-                title={isSidebarCollapsed ? "Gió" : ""}
-              >
-                <Wind className="w-5 h-5" strokeWidth={1.5} />
-                {!isSidebarCollapsed && <span className="text-sm font-semibold">Dữ liệu Gió</span>}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => switchEnvTab(activeEnvTab === "temp" ? null : "temp")}
-                className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group ${
-                  activeEnvTab === "temp" ? "bg-orange-500/20 text-orange-400 border border-orange-500/20" : "text-white/60 hover:bg-white/5 hover:text-white"
-                } ${isSidebarCollapsed ? "justify-center" : "gap-3 px-3"}`}
-                title={isSidebarCollapsed ? "Nhiệt độ" : ""}
-              >
-                <Thermometer className="w-5 h-5" strokeWidth={1.5} />
-                {!isSidebarCollapsed && <span className="text-sm font-semibold">Nhiệt độ</span>}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => switchEnvTab(activeEnvTab === "clouds" ? null : "clouds")}
-                className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group ${
-                  activeEnvTab === "clouds" ? "bg-blue-500/20 text-blue-400 border border-blue-500/20" : "text-white/60 hover:bg-white/5 hover:text-white"
-                } ${isSidebarCollapsed ? "justify-center" : "gap-3 px-3"}`}
-                title={isSidebarCollapsed ? "Thời tiết" : ""}
-              >
-                <CloudSun className="w-5 h-5" strokeWidth={1.5} />
-                {!isSidebarCollapsed && <span className="text-sm font-semibold">Thời tiết</span>}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => switchEnvTab(activeEnvTab === "rain" ? null : "rain")}
-                className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group ${
-                  activeEnvTab === "rain" ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/20" : "text-white/60 hover:bg-white/5 hover:text-white"
-                } ${isSidebarCollapsed ? "justify-center" : "gap-3 px-3"}`}
-                title={isSidebarCollapsed ? "Mưa" : ""}
-              >
-                <CloudRain className="w-5 h-5" strokeWidth={1.5} />
-                {!isSidebarCollapsed && <span className="text-sm font-semibold">Lượng mưa</span>}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => switchEnvTab(activeEnvTab === "clouds" ? null : "clouds")}
-                className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group ${
-                  activeEnvTab === "clouds" ? "bg-zinc-500/20 text-zinc-300 border border-zinc-500/20" : "text-white/60 hover:bg-white/5 hover:text-white"
-                } ${isSidebarCollapsed ? "justify-center" : "gap-3 px-3"}`}
-                title={isSidebarCollapsed ? "Mây" : ""}
-              >
-                <Cloud className="w-5 h-5" strokeWidth={1.5} />
-                {!isSidebarCollapsed && <span className="text-sm font-semibold">Độ che phủ mây</span>}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => switchEnvTab(activeEnvTab === "aqi" ? null : "aqi")}
-                className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group ${
-                  activeEnvTab === "aqi" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/20" : "text-white/60 hover:bg-white/5 hover:text-white"
-                } ${isSidebarCollapsed ? "justify-center" : "gap-3 px-3"}`}
-                title={isSidebarCollapsed ? "Chất lượng không khí" : ""}
-              >
-                <Droplets className="w-5 h-5" strokeWidth={1.5} />
-                {!isSidebarCollapsed && <span className="text-sm font-semibold">Chất lượng không khí</span>}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowWindSim(!showWindSim)}
-                className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group ${
-                  showWindSim ? "bg-violet-500/20 text-violet-400 border border-violet-500/20" : "text-white/60 hover:bg-white/5 hover:text-white"
-                } ${isSidebarCollapsed ? "justify-center" : "gap-3 px-3"}`}
-                title={isSidebarCollapsed ? "Gió 3D" : ""}
-              >
-                <Zap className="w-5 h-5" strokeWidth={1.5} />
-                {!isSidebarCollapsed && <span className="text-sm font-semibold">Mô phỏng Gió 3D</span>}
-              </button>
-            </div>
-
-            {/* Windy Controls */}
-            {windyUrl && (
-              <div className="space-y-1">
-                {!isSidebarCollapsed && <p className="px-2 text-[10px] font-bold uppercase tracking-widest text-white/30 mb-2">Windy Overlay</p>}
-                
-                <button
-                  type="button"
-                  onClick={windyDisplayMode === "full" ? closeWindyFullToPanel : openWindyFull}
-                  className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group text-white/60 hover:bg-white/5 hover:text-white ${
-                    isSidebarCollapsed ? "justify-center" : "gap-3 px-3"
-                  }`}
-                >
-                  {windyDisplayMode === "full" ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-                  {!isSidebarCollapsed && (
-                    <span className="text-sm font-semibold">{windyDisplayMode === "full" ? "Thu nhỏ Windy" : "Mở rộng Windy"}</span>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => switchEnvTab(null)}
-                  className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 group text-white/60 hover:bg-rose-500/10 hover:text-rose-400 ${
-                    isSidebarCollapsed ? "justify-center" : "gap-3 px-3"
-                  }`}
-                >
-                  <X className="w-5 h-5" strokeWidth={1.5} />
-                  {!isSidebarCollapsed && <span className="text-sm font-semibold">Tắt lớp phủ</span>}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Sidebar Toggle */}
-        <div className="p-3 border-t border-white/5 flex items-center justify-between">
-           {!isSidebarCollapsed && (
-             <div className="flex items-center gap-2 px-2">
-               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-               <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider">System Live</span>
-             </div>
-           )}
-          <button
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className={`p-2 rounded-lg bg-white/5 text-white/60 hover:text-white hover:bg-white/10 transition-all ${isSidebarCollapsed ? "w-full flex justify-center" : ""}`}
-          >
-            {isSidebarCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-          </button>
-        </div>
-      </aside>
+      <Sidebar
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        statusMessage={statusMessage}
+        operationMode={operationMode}
+        onSetOperationMode={setOperationMode}
+        activeEnvTab={activeEnvTab}
+        onSwitchEnvTab={switchEnvTab}
+        showWindSim={showWindSim}
+        onToggleWindSim={() => setShowWindSim(!showWindSim)}
+        windyUrl={windyUrl}
+        windyDisplayMode={windyDisplayMode}
+        onCloseWindyFullToPanel={closeWindyFullToPanel}
+        onOpenWindyFull={openWindyFull}
+        onStartPolygonDraw={startPolygonDraw}
+        onImportData={() =>
+          setStatusMessage("Chuẩn bị import dữ liệu dự án...")
+        }
+      />
 
       {/* Main Map Container */}
-      <div 
-        className={`fixed inset-0 pt-14 transition-all duration-500 cubic-bezier(0.4, 0, 0.2, 1) ${
+      <div
+        className={`fixed inset-0 pt-16 transition-all duration-500 cubic-bezier(0.4, 0, 0.2, 1) ${
           isSidebarCollapsed ? "pl-16" : "pl-[300px]"
         }`}
       >
         <div ref={containerRef} className="h-full w-full" />
       </div>
 
-      {/* Property Editor Panel (Floating) */}
+      {/* Property Editor Panel */}
       {!isSidebarCollapsed && selectedFeatureId && (
-        <div className="fixed right-6 top-20 bottom-6 w-[340px] z-30 flex flex-col gap-4 overflow-y-auto rounded-2xl border border-white/10 bg-black/80 backdrop-blur-2xl p-5 shadow-2xl animate-in fade-in slide-in-from-right-4 duration-500">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-lg font-bold text-white tracking-tight">Thuộc tính khối</h3>
-            <button onClick={() => setSelectedFeatureId(null)} className="p-2 text-white/40 hover:text-white transition-colors">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="space-y-6">
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-white/30">Cao (m)</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={heightInput}
-                    onChange={(event) => setHeightInput(event.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white outline-none focus:border-cyan-500/50 focus:ring-4 focus:ring-cyan-500/10 transition-all"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-white/30">Số tầng</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={floorsInput}
-                    onChange={(event) => setFloorsInput(event.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white outline-none focus:border-cyan-500/50 focus:ring-4 focus:ring-cyan-500/10 transition-all"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-white/30">Kiểu mái</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["flat", "pyramid", "tiered"] as RoofProfile[]).map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => setRoofTypeInput(type)}
-                      className={`py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border ${
-                        roofTypeInput === type 
-                          ? "bg-white text-black border-white shadow-lg" 
-                          : "bg-white/5 text-white/40 border-white/10 hover:border-white/20"
-                      }`}
-                    >
-                      {type}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <button
-                onClick={applySelectedProperties}
-                className="w-full py-3 rounded-xl bg-white text-black text-sm font-bold shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all"
-              >
-                Cập nhật thay đổi
-              </button>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={startShapeEdit}
-                  className="py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white/70 hover:bg-white/10 transition-all"
-                >
-                  Chỉnh điểm
-                </button>
-                <button
-                  onClick={deleteSelectedFeature}
-                  className="py-2.5 rounded-xl border border-rose-500/20 bg-rose-500/10 text-xs font-bold text-rose-400 hover:bg-rose-500/20 transition-all"
-                >
-                  Xóa khối
-                </button>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-white/5">
-              <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-3">GeoJSON Data</h4>
-              <div className="p-4 rounded-xl bg-black border border-white/5 text-[10px] font-mono text-cyan-400/80 overflow-auto max-h-[200px] scrollbar-hide">
-                <pre>{payloadPreview}</pre>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PropertyEditorPanel
+          selectedFeatureId={selectedFeatureId}
+          heightInput={heightInput}
+          floorsInput={floorsInput}
+          roofTypeInput={roofTypeInput}
+          payloadPreview={payloadPreview}
+          onHeightChange={setHeightInput}
+          onFloorsChange={setFloorsInput}
+          onRoofTypeChange={setRoofTypeInput}
+          onApply={applySelectedProperties}
+          onStartShapeEdit={startShapeEdit}
+          onDelete={deleteSelectedFeature}
+          onClose={() => setSelectedFeatureId(null)}
+        />
       )}
 
-      {/* Model Import Panel (Floating) */}
+      {/* Model Import Panel */}
       {!isSidebarCollapsed && operationMode === "import" && (
-        <div className="fixed right-6 top-20 w-[340px] z-30 flex flex-col gap-6 rounded-2xl border border-white/10 bg-black/80 backdrop-blur-2xl p-6 shadow-2xl animate-in fade-in slide-in-from-right-4 duration-500">
-           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-white tracking-tight">Nhập mô hình 3D</h3>
-            <button onClick={() => setOperationMode("draw")} className="p-2 text-white/40 hover:text-white transition-colors">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div className="space-y-6">
-            <label className="group flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-white/10 bg-white/5 p-8 transition-all hover:bg-white/10 hover:border-white/20 cursor-pointer">
-              <Upload className="w-10 h-10 text-white/20 group-hover:text-white group-hover:scale-110 transition-all mb-4" />
-              <span className="text-sm font-bold text-white/80 mb-1">Tải lên mô hình</span>
-              <span className="text-[10px] text-white/30 font-medium uppercase tracking-widest">Định dạng .GLB / .GLTF</span>
-              <input type="file" accept=".glb,.gltf" onChange={handleModelFileImport} className="hidden" />
-            </label>
-
-            {modelFileName && (
-              <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center gap-3">
-                <Box className="w-4 h-4 text-cyan-400" />
-                <span className="text-xs font-bold text-cyan-400 truncate">{modelFileName}</span>
-              </div>
-            )}
-
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-white/30">Tỉ lệ</label>
-                  <input
-                    type="number"
-                    min={0.01}
-                    step={0.1}
-                    value={modelScaleInput}
-                    onChange={(e) => setModelScaleInput(e.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white outline-none focus:border-white/40 transition-all"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-white/30">Xoay (độ)</label>
-                  <input
-                    type="number"
-                    value={modelRotationInput}
-                    onChange={(e) => setModelRotationInput(e.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white outline-none focus:border-white/40 transition-all"
-                  />
-                </div>
-              </div>
-              <button
-                onClick={applyModelScale}
-                className="w-full py-3 rounded-xl bg-white text-black text-sm font-bold shadow-xl hover:bg-zinc-200 transition-all"
-              >
-                Cập nhật mô hình
-              </button>
-              <button
-                onClick={clearImportedModel}
-                className="w-full py-3 rounded-xl border border-rose-500/20 bg-rose-500/10 text-sm font-bold text-rose-400 hover:bg-rose-500/20 transition-all"
-              >
-                Xóa mô hình
-              </button>
-            </div>
-          </div>
-        </div>
+        <ModelImportPanel
+          modelFileName={modelFileName}
+          modelScaleInput={modelScaleInput}
+          modelRotationInput={modelRotationInput}
+          onScaleChange={setModelScaleInput}
+          onRotationChange={setModelRotationInput}
+          onFileImport={handleModelFileImport}
+          onApplyScale={applyModelScale}
+          onClearModel={clearImportedModel}
+          onClose={() => setOperationMode("draw")}
+        />
       )}
 
-      {/* Windy Overlay (Floating Window) */}
-      {windyUrl && windyDisplayMode === "panel" && (
-        <div className="fixed right-6 bottom-6 w-[400px] h-[300px] z-30 rounded-2xl border border-white/10 bg-black/80 backdrop-blur-2xl p-4 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-           <div className="flex items-center justify-between mb-3 px-1">
-            <div className="flex items-center gap-2">
-              <Wind className="w-4 h-4 text-cyan-400" />
-              <span className="text-[11px] font-bold text-white uppercase tracking-widest">Windy Live</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <button onClick={openWindyFull} className="p-1.5 text-white/40 hover:text-white transition-colors">
-                <Maximize2 className="w-4 h-4" />
-              </button>
-              <button onClick={() => switchEnvTab(null)} className="p-1.5 text-white/40 hover:text-rose-400 transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-          <iframe src={windyUrl} className="w-full h-[calc(100%-40px)] rounded-xl border border-white/5 shadow-inner" />
-        </div>
+      {/* Windy Overlay */}
+      {windyUrl && (
+        <WindyOverlay
+          windyUrl={windyUrl}
+          windyDisplayMode={windyDisplayMode}
+          onCloseWindyFullToPanel={closeWindyFullToPanel}
+          onOpenWindyFull={openWindyFull}
+          onSwitchEnvTab={switchEnvTab}
+        />
       )}
 
-      {/* Windy Full Screen Overlay */}
-      {windyUrl && windyDisplayMode === "full" && (
-        <div className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in duration-500">
-          <div className="w-full h-full max-w-6xl max-h-[800px] rounded-3xl border border-white/10 bg-black shadow-2xl overflow-hidden relative">
-            <div className="absolute top-6 right-6 z-10 flex gap-2">
-              <button 
-                onClick={closeWindyFullToPanel}
-                className="p-3 rounded-2xl bg-black/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-white transition-all shadow-xl hover:scale-110 active:scale-95"
-              >
-                <Minimize2 className="w-6 h-6" />
-              </button>
-              <button 
-                onClick={() => switchEnvTab(null)}
-                className="p-3 rounded-2xl bg-black/80 backdrop-blur-md border border-white/10 text-white/60 hover:text-rose-400 transition-all shadow-xl hover:scale-110 active:scale-95"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <iframe src={windyUrl} className="w-full h-full" />
-          </div>
-        </div>
-      )}
-
-      {/* Loading State Overlay */}
-      {isLoadingEnv && (
-        <div className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-[2px] flex items-center justify-center pointer-events-none">
-          <div className="bg-black/80 border border-white/10 px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 animate-in zoom-in duration-300">
-            <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-            <span className="text-sm font-bold text-white tracking-tight">Đang tải dữ liệu môi trường...</span>
-          </div>
-        </div>
-      )}
+      {/* Loading Overlay */}
+      {isLoadingEnv && <LoadingOverlay />}
     </section>
   );
 }
-
