@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Sử dụng Local Ollama (OpenAI compatible endpoint)
-const VLLM_MODEL = "llama3";
-const VLLM_URL = "http://localhost:11434/v1/chat/completions";
+// Cấu hình AI Backend - Ưu tiên Groq (Free & Siêu nhanh) hoặc Ollama Local
+const AI_URL = process.env.AI_API_URL || "https://api.groq.com/openai/v1/chat/completions";
+const AI_MODEL = process.env.AI_MODEL || "llama3-70b-8192";
+const AI_KEY = process.env.AI_API_KEY || "";
 
 const SYSTEM_INSTRUCTION = `BẮT BUỘC: PHẢI TRẢ LỜI BẰNG TIẾNG VIỆT TRONG MỌI TRƯỜNG HỢP. TUYỆT ĐỐI KHÔNG DÙNG TIẾNG ANH.
 
@@ -42,14 +43,17 @@ export async function POST(req: NextRequest) {
       }))
     ];
 
-    const response = await fetch(VLLM_URL, {
+    const response = await fetch(AI_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        ...(AI_KEY ? { "Authorization": `Bearer ${AI_KEY}` } : {})
+      },
       body: JSON.stringify({
-        model: VLLM_MODEL,
+        model: AI_MODEL,
         messages: vllmMessages,
         temperature: 0.7,
-        stream: true, // Kích hoạt streaming
+        stream: true,
       }),
     });
 

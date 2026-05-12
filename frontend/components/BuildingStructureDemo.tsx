@@ -506,6 +506,8 @@ export function BuildingStructureDemo() {
     }
   };
 
+
+
   // Fetch env data from backend, then update map + particles
   const fetchEnvData = async (lat: number, lng: number) => {
     setIsLoadingEnv(true);
@@ -678,6 +680,7 @@ export function BuildingStructureDemo() {
       accessToken: mapToken,
       mapboxgl: mapboxgl as unknown as typeof import("mapbox-gl"),
       marker: false,
+      collapsed: true, // Chuyển thanh search thành nút icon để responsive tốt hơn
       placeholder: "Tìm kiếm địa điểm, địa danh nổi tiếng...",
       countries: "vn",
       types: "poi,poi.landmark,place,address",
