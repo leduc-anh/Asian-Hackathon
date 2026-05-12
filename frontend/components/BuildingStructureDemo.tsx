@@ -508,12 +508,11 @@ export function BuildingStructureDemo() {
 
 
 
-  // Fetch env data from backend, then update map + particles
+  // Fetch env data from internal Next.js API (Serverless)
   const fetchEnvData = async (lat: number, lng: number) => {
     setIsLoadingEnv(true);
     try {
-      const base = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
-      const res = await fetch(`${base}/api/env/current?lat=${lat}&lng=${lng}`);
+      const res = await fetch(`/api/env?lat=${lat}&lng=${lng}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: EnvData = await res.json();
       setEnvData(data);
