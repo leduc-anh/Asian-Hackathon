@@ -10,6 +10,8 @@ class Settings:
         "DATABASE_URL",
         "postgresql+asyncpg://asuser:aspass123@db:5432/aerotwin_dev",
     )
+    openweathermap_api_key: str = os.getenv("OPENWEATHERMAP_API_KEY", "")
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
 
 
 settings = Settings()

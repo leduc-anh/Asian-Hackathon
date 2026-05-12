@@ -1,1 +1,1 @@
-export {};
+export { BuildingStructureDemo } from "./BuildingStructureDemo";
