@@ -9,10 +9,12 @@ import {
   GLTFLoader,
   type GLTF,
 } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { Moon, Sun } from "lucide-react";
 
 import { Header } from "@/components/layout";
 import { Sidebar } from "@/components/layout";
-import { PropertyEditorPanel, ModelImportPanel } from "@/components/panels";
+import { PropertyEditorPanel, ModelImportPanel, AIChatPanel, AIChatTrigger } from "@/components/panels";
+import type { ChatAction, BuildingInfo } from "@/components/panels";
 import { WindyOverlay, LoadingOverlay } from "@/components/overlays";
 
 type FeatureCollection = GeoJSON.FeatureCollection<
@@ -20,6 +22,7 @@ type FeatureCollection = GeoJSON.FeatureCollection<
 >;
 type RoofProfile = "flat" | "pyramid" | "tiered";
 type EnvTab = "temp" | "wind" | "aqi" | "clouds" | "rain";
+type LightMode = "day" | "dusk" | "night";
 
 interface EnvData {
   wind: { speed: number; deg: number };
@@ -169,8 +172,9 @@ export function BuildingStructureDemo() {
   const windTrailRef = useRef<THREE.LineSegments | null>(null);
   const windDataRef = useRef<WindParticle3D[]>([]);
   const activeEnvTabRef = useRef<EnvTab | null>(null);
-  const showWindSimRef = useRef(true);
+  const showWindSimRef = useRef(false);
   const windAnchorRef = useRef<mapboxgl.LngLat | null>(null);
+  const cachedDrawFeaturesRef = useRef<any[]>([]);
   const envDataRef = useRef<EnvData | null>(null);
   const [envData, setEnvData] = useState<EnvData | null>(null);
   const [isLoadingEnv, setIsLoadingEnv] = useState(false);
@@ -199,6 +203,95 @@ export function BuildingStructureDemo() {
   const [windyDisplayMode, setWindyDisplayMode] = useState<"full" | "panel">(
     "full",
   );
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatAutoPrompt, setChatAutoPrompt] = useState("");
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | null>(null);
+  const [contextBuildings, setContextBuildings] = useState<BuildingInfo[]>([]);
+  const [lightMode, setLightMode] = useState<LightMode>("day");
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [loadingTextIndex, setLoadingTextIndex] = useState(0);
+
+  const loadingMessages = [
+    "Đang nạp dữ liệu đô thị 3D...",
+    "Mô phỏng trường gió 2.5D Raster...",
+    "Tính toán Morphological Wind Resistance...",
+    "Tối ưu hóa Street Canyon Trapping Matrix...",
+    "Phân tích bụi mịn AQI theo phương pháp AQUIS...",
+    "Đang nạp Shader đồ họa & Khử răng cưa...",
+    "Sẵn sàng kiến tạo tương lai..."
+  ];
+
+  // Dùng Mapbox Padding Camera thay vì Resize DOM Canvas (giúp mượt mà 100% không bị lag FPS và không có mảng đen)
+  useEffect(() => {
+    if (!mapRef.current) return;
+    // Stop any current camera animations to prevent "spam" jitter
+    mapRef.current.stop();
+    mapRef.current.easeTo({
+      padding: {
+        left: isSidebarCollapsed ? 64 : 300,
+        right: isChatOpen ? 420 : 0,
+      },
+      duration: 0, // Chuyển đổi tức thì, không tốn tài nguyên GPU
+    });
+  }, [isSidebarCollapsed, isChatOpen]);
+
+  // Initial loading screen for 25 seconds
+  useEffect(() => {
+    // Rotate loading text
+    const textInterval = setInterval(() => {
+      setLoadingTextIndex(prev => (prev + 1) % loadingMessages.length);
+    }, 3000);
+
+    const timer = setTimeout(() => {
+      setIsInitialLoading(false);
+      clearInterval(textInterval);
+    }, 25000);
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(textInterval);
+    };
+  }, []);
+
+  // Pre-warm map animation to stabilize FPS
+  useEffect(() => {
+    if (!isInitialLoading || !mapRef.current) return;
+    
+    // Khởi động nhẹ Mapbox để cache tiles và shaders
+    const interval = setInterval(() => {
+      if (mapRef.current) {
+        mapRef.current.easeTo({
+          bearing: mapRef.current.getBearing() + 0.1,
+          duration: 100,
+          easing: (t) => t
+        });
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [isInitialLoading]);
+
+  // Mapbox v3 Lighting API - Smooth interpolation
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const map = mapRef.current;
+    
+    try {
+      // Sử dụng config property có sẵn của v3 Standard Style nhưng gọi một cách tối ưu
+      map.setConfigProperty('basemap', 'lightPreset', lightMode);
+      
+      // Bổ sung thêm Atmosphere (Bầu trời) mượt mà hơn bằng Globe & Fog mặc định
+      map.setFog({
+        'range': [0.8, 8],
+        'horizon-blend': 0.1,
+        'star-intensity': lightMode === 'night' ? 0.8 : 0,
+        'space-color': lightMode === 'night' ? '#010b19' : lightMode === 'dusk' ? '#211010' : '#ffffff'
+      });
+    } catch (e) {
+      console.warn("Lighting update error:", e);
+    }
+  }, [lightMode]);
+
 
   const mapToken = useMemo(
     () =>
@@ -220,6 +313,13 @@ export function BuildingStructureDemo() {
 
   useEffect(() => {
     showWindSimRef.current = showWindSim;
+    if (windMeshRef.current && windTrailRef.current) {
+      windMeshRef.current.visible = showWindSim;
+      windTrailRef.current.visible = showWindSim;
+      if (showWindSim && mapRef.current) {
+        mapRef.current.triggerRepaint();
+      }
+    }
   }, [showWindSim]);
 
   useEffect(() => {
@@ -545,15 +645,22 @@ export function BuildingStructureDemo() {
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: "mapbox://styles/mapbox/standard",
-      center: [106.70098, 10.77653],
-      zoom: 14,
-      pitch: 58,
+      projection: "globe",
+      fadeDuration: 300, // Thêm fade mượt khi load tile
+      center: [106.70098, 10.77653], // Tòa nhà ở TP.HCM
+      zoom: 16, // Zoom gần hơn để hiện rõ 3D buildings
+      pitch: 60,
       bearing: -15,
-      antialias: true,
+      antialias: false, // Tắt khử răng cưa để tăng gấp đôi FPS khi cuộn bản đồ
+      minZoom: 5,
+      maxZoom: 22,
+      maxBounds: [
+        [102.14, 8.56], // Tây Nam Việt Nam
+        [109.46, 23.39] // Đông Bắc Việt Nam
+      ]
     });
 
     const draw = new MapboxDraw({
-      displayControlsDefault: false,
       controls: {
         polygon: false,
         trash: true,
@@ -571,11 +678,96 @@ export function BuildingStructureDemo() {
       accessToken: mapToken,
       mapboxgl: mapboxgl as unknown as typeof import("mapbox-gl"),
       marker: false,
-      placeholder: "Search địa điểm để bay nhanh...",
+      placeholder: "Tìm kiếm địa điểm, địa danh nổi tiếng...",
+      countries: "vn",
+      types: "poi,poi.landmark,place,address",
       flyTo: {
         zoom: 16,
-        speed: 1,
-        curve: 1.2,
+        speed: 0.8, // Giảm tốc độ để Mapbox kịp load tile, tránh bị trắng bản đồ
+        curve: 1.0,
+        essential: true
+      },
+      localGeocoder: (query: string) => {
+        const results: any[] = [];
+        const lowerQuery = query.toLowerCase();
+
+        // 1. Famous Vietnamese Landmarks Shortcut
+        const landmarks = [
+          { name: "Hồ Hoàn Kiếm, Hà Nội", coords: [105.8523, 21.0285] },
+          { name: "Chùa Một Cột, Hà Nội", coords: [105.8336, 21.0358] },
+          { name: "Lăng Chủ tịch Hồ Chí Minh, Hà Nội", coords: [105.8347, 21.0368] },
+          { name: "Vịnh Hạ Long, Quảng Ninh", coords: [107.0811, 20.9101] },
+          { name: "Cầu Vàng (Bà Nà Hills), Đà Nẵng", coords: [107.9958, 15.9951] },
+          { name: "Hội An, Quảng Nam", coords: [108.3274, 15.8801] },
+          { name: "Dinh Độc Lập, TP.HCM", coords: [106.6953, 10.7770] },
+          { name: "Nhà Thờ Đức Bà, TP.HCM", coords: [106.6991, 10.7798] },
+          { name: "Chợ Bến Thành, TP.HCM", coords: [106.6974, 10.7719] },
+          { name: "Landmark 81, TP.HCM", coords: [106.7219, 10.7950] },
+          { name: "Bitexco Financial Tower, TP.HCM", coords: [106.7044, 10.7715] },
+          { name: "Fansipan, Lào Cai", coords: [103.7750, 22.3033] },
+          { name: "Phú Quốc, Kiên Giang", coords: [103.9840, 10.2289] },
+        ];
+
+        landmarks.forEach(item => {
+          if (item.name.toLowerCase().includes(lowerQuery)) {
+            results.push({
+              center: item.coords,
+              geometry: { type: "Point", coordinates: item.coords },
+              place_name: `🌟 ${item.name}`,
+              place_type: ["landmark"],
+              properties: { landmark: true },
+              type: "Feature"
+            });
+          }
+        });
+
+        // 2. Parse Decimal (lat, lng)
+        const decRegex = /^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/;
+        const decMatch = query.match(decRegex);
+        if (decMatch) {
+          const lat = parseFloat(decMatch[1]);
+          const lng = parseFloat(decMatch[2]);
+          results.push({
+            center: [lng, lat],
+            geometry: { type: "Point", coordinates: [lng, lat] },
+            place_name: `Tọa độ: ${lat.toFixed(5)}°, ${lng.toFixed(5)}°`,
+            place_type: ["coordinate"],
+            properties: {},
+            type: "Feature"
+          });
+        }
+
+        // 3. Parse DMS (10°47′42″B 106°43′19″Đ)
+        const dmsRegex = /(\d+)[°\s]+(\d+)['′\s]+(\d+(?:\.\d+)?)["″\s]*([a-zA-ZĐđ]+)\s*,?\s*(\d+)[°\s]+(\d+)['′\s]+(\d+(?:\.\d+)?)["″\s]*([a-zA-ZĐđ]+)/i;
+        const dmsMatch = query.match(dmsRegex);
+        if (dmsMatch) {
+          const latDeg = parseFloat(dmsMatch[1]);
+          const latMin = parseFloat(dmsMatch[2]);
+          const latSec = parseFloat(dmsMatch[3]);
+          const latDir = dmsMatch[4].toUpperCase();
+
+          const lngDeg = parseFloat(dmsMatch[5]);
+          const lngMin = parseFloat(dmsMatch[6]);
+          const lngSec = parseFloat(dmsMatch[7]);
+          const lngDir = dmsMatch[8].toUpperCase();
+
+          let lat = latDeg + latMin / 60 + latSec / 3600;
+          if (latDir === 'S' || latDir === 'NAM') lat = -lat;
+
+          let lng = lngDeg + lngMin / 60 + lngSec / 3600;
+          if (lngDir === 'T' || lngDir === 'W' || lngDir === 'TÂY') lng = -lng;
+
+          results.push({
+            center: [lng, lat],
+            geometry: { type: "Point", coordinates: [lng, lat] },
+            place_name: `Tọa độ DMS: ${lat.toFixed(5)}°N, ${lng.toFixed(5)}°E`,
+            place_type: ["coordinate"],
+            properties: {},
+            type: "Feature"
+          });
+        }
+        
+        return results;
       },
     });
     map.addControl(geocoder, "top-right");
@@ -598,6 +790,8 @@ export function BuildingStructureDemo() {
           },
         };
       });
+
+      cachedDrawFeaturesRef.current = safeFeatures;
 
       const normalizedCollection: FeatureCollection = {
         type: "FeatureCollection",
@@ -711,7 +905,49 @@ export function BuildingStructureDemo() {
       }
     };
 
+    const updateContext = () => {
+      const mc = map.getCenter();
+      setMapCenter({ lat: mc.lat, lng: mc.lng });
+      try {
+        const features = map.queryRenderedFeatures();
+        const bldgs = features.map((f: any, i) => {
+          // Filter out our own drawn buildings
+          if (f.layer.id === LAYER_ID || f.layer.id === ROOF_LAYER_ID) return null;
+          // Only keep buildings with height
+          const h = Number(f.properties?.height || 0);
+          if (h <= 0) return null;
+
+          let lat = mc.lat, lng = mc.lng;
+          if (f.geometry?.coordinates?.[0]?.[0]) {
+            lng = f.geometry.coordinates[0][0][0] || mc.lng;
+            lat = f.geometry.coordinates[0][0][1] || mc.lat;
+          }
+          const dist = Math.sqrt((mc.lat - lat) ** 2 + (mc.lng - lng) ** 2);
+          return {
+            id: `context-${f.id || i}`,
+            height: h,
+            floors: Math.floor(h / 3) || 1,
+            roofType: "flat",
+            _dist: dist
+          };
+        }).filter(Boolean) as (BuildingInfo & { _dist: number })[];
+
+        const uniqueBldgs = Array.from(new Map(bldgs.map(b => [b.id, b])).values())
+          .sort((a, b) => a._dist - b._dist)
+          .slice(0, 10) // Tăng lên 10 tòa nhà xung quanh
+          .map(b => ({ id: b.id, height: b.height, floors: b.floors, roofType: b.roofType }));
+        setContextBuildings(uniqueBldgs);
+      } catch (e) {
+        // layer might not exist yet
+      }
+    };
+
+
+    // Track map center for AI context
+    map.on("moveend", updateContext);
+
     map.on("load", () => {
+      updateContext();
       const scene = new THREE.Scene();
       const ambientLight = new THREE.AmbientLight("#ffffff", 2.0);
       const directionalLight = new THREE.DirectionalLight("#ffffff", 2.5);
@@ -723,16 +959,15 @@ export function BuildingStructureDemo() {
       scene.add(fillLight);
 
       // SETUP 3D WIND PARTICLES
-      const windCount = 1000;
-      const windTrailLength = 8;
-      // Use a sphere that we will scale into a soft ellipsoid, avoiding the "rigid stick" look
-      const windGeo = new THREE.SphereGeometry(0.25, 6, 6);
+      const windCount = 200; // Giảm xuống 200 để tăng tối đa FPS mà vẫn đủ nhìn
+      const windTrailLength = 16;
+      const windGeo = new THREE.SphereGeometry(0.7, 6, 6); // Làm hạt gió to và dày hơn
       // windGeo.rotateX(Math.PI / 2); // Not strictly needed for a sphere, but keeps orientation logic consistent if scaled
       const windMat = new THREE.MeshPhongMaterial({
-        color: 0xffffff, // Color is overridden by instanceColor
+        color: 0x00ffff, // Đổi màu hạt sang Cyan (xanh biển sáng)
         transparent: true,
-        opacity: 0.9,
-        shininess: 120,
+        opacity: 1.0,
+        shininess: 150,
       });
       const windMesh = new THREE.InstancedMesh(windGeo, windMat, windCount);
       windMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -751,9 +986,10 @@ export function BuildingStructureDemo() {
       const trailMaterial = new THREE.LineBasicMaterial({
         vertexColors: true,
         transparent: true,
-        opacity: 0.72,
+        opacity: 1.0, // Làm nét đuôi gió
         blending: THREE.AdditiveBlending,
         depthWrite: false,
+        linewidth: 3, // Cố gắng làm đuôi dày hơn (có thể bị giới hạn bởi WebGL 1px tùy trình duyệt)
       });
       const windTrail = new THREE.LineSegments(trailGeometry, trailMaterial);
       windTrail.frustumCulled = false;
@@ -891,6 +1127,11 @@ export function BuildingStructureDemo() {
           // Continuous repaint here can saturate CPU/GPU and make UI feel unclickable.
 
           // UPDATE 3D WIND PARTICLES
+          if (!showWindSimRef.current) {
+            // Nếu không bật mô phỏng gió, bỏ qua tính toán và không gọi triggerRepaint để tiết kiệm 100% GPU
+            return;
+          }
+
           const wMesh = windMeshRef.current;
           const wTrail = windTrailRef.current;
           const wData = windDataRef.current;
@@ -943,9 +1184,8 @@ export function BuildingStructureDemo() {
             }
 
             // Add Drawn Buildings
-            if (drawRef.current) {
-              const features = drawRef.current.getAll().features;
-              for (const feat of features) {
+            const features = cachedDrawFeaturesRef.current;
+            for (const feat of features) {
                 if (feat.geometry.type === "Polygon") {
                   const coords = feat.geometry.coordinates[0];
                   if (!coords || coords.length === 0) continue;
@@ -989,7 +1229,6 @@ export function BuildingStructureDemo() {
                   obstacles.push({ x: ox, z: oz, r: (dist + 5) * 1.5, h: h });
                 }
               }
-            }
 
             const shouldShow = showWindSimRef.current && obstacles.length > 0;
 
@@ -1193,7 +1432,7 @@ export function BuildingStructureDemo() {
                 p.life += 1;
 
                 p.trail.push(p.position.clone());
-                if (p.trail.length > 8) {
+                if (p.trail.length > 16) {
                   p.trail.shift();
                 }
 
@@ -1207,7 +1446,7 @@ export function BuildingStructureDemo() {
                 ) {
                   p.life = 0;
                   p.maxLife = 600 + Math.random() * 400;
-                  const spawnDist = 350;
+                  const spawnDist = 150;
                   if (Math.abs(baseDirX) > Math.abs(baseDirZ)) {
                     p.position.set(
                       baseDirX > 0 ? -spawnDist : spawnDist,
@@ -1224,7 +1463,7 @@ export function BuildingStructureDemo() {
                   // Reset momentum completely upon respawn
                   p.velocity.set(baseDirX * 60, 0, baseDirZ * 60);
                   p.smoothVelocity.copy(p.velocity);
-                  p.trail = Array.from({ length: 8 }, () => p.position.clone());
+                  p.trail = Array.from({ length: 16 }, () => p.position.clone());
                 }
 
                 dummy.position.copy(p.position);
@@ -1245,8 +1484,8 @@ export function BuildingStructureDemo() {
                 dummy.updateMatrix();
                 wMesh.setMatrixAt(i, dummy.matrix);
 
-                // Color mapping: Blue (slow) -> Green (med) -> Yellow -> Red (fast)
-                colorObj.setHSL(0.65 - speedRatio * 0.65, 1.0, 0.5);
+                // Color mapping: Cyan/Blue (tông màu đậm, sáng)
+                colorObj.setHSL(0.55 - speedRatio * 0.15, 1.0, 0.5); 
                 wMesh.setColorAt(i, colorObj);
 
                 if (trailPosAttr && trailColorAttr) {
@@ -1265,9 +1504,9 @@ export function BuildingStructureDemo() {
 
                     const fade = seg / Math.max(p.trail.length - 1, 1);
                     trailColor.setHSL(
-                      0.65 - speedRatio * 0.65,
+                      0.55 - speedRatio * 0.15,
                       1.0,
-                      0.35 + fade * 0.25,
+                      0.4 + fade * 0.4, // Giữ độ sáng cao để đuôi gió đậm hơn
                     );
                     trailColorAttr.setXYZ(
                       v0,
@@ -1334,7 +1573,7 @@ export function BuildingStructureDemo() {
             ],
             "fill-extrusion-height": ["coalesce", ["get", "height"], 0],
             "fill-extrusion-base": ["coalesce", ["get", "min_height"], 0],
-            "fill-extrusion-opacity": 0.35,
+            "fill-extrusion-opacity": 0.0, // Đặt trong suốt để không che mất tòa nhà chi tiết thật của Mapbox Standard
             "fill-extrusion-vertical-gradient": true,
           },
         });
@@ -1616,6 +1855,10 @@ export function BuildingStructureDemo() {
       setStatusMessage(
         "Model đã xuất hiện trước mặt bạn. Kéo chấm cyan trên map để đặt đúng vị trí.",
       );
+
+      // Auto open chat and analyze
+      setIsChatOpen(true);
+      setChatAutoPrompt(`Tôi vừa import công trình 3D "${file.name}". Hãy phân tích mô hình này trong bối cảnh các tòa nhà xung quanh, từ đó đưa ra lời khuyên chi tiết về thiết kế tối ưu, điều hướng thông gió tự nhiên, và các cảnh báo an toàn cần lưu ý.`);
     } catch (error) {
       const msg =
         error instanceof Error
@@ -1810,6 +2053,8 @@ export function BuildingStructureDemo() {
       };
     });
 
+    cachedDrawFeaturesRef.current = safeFeatures;
+
     const source = map.getSource(SOURCE_ID) as
       | mapboxgl.GeoJSONSource
       | undefined;
@@ -1854,12 +2099,8 @@ export function BuildingStructureDemo() {
         }
       />
 
-      {/* Main Map Container */}
-      <div
-        className={`fixed inset-0 pt-16 transition-all duration-500 cubic-bezier(0.4, 0, 0.2, 1) ${
-          isSidebarCollapsed ? "pl-16" : "pl-[300px]"
-        }`}
-      >
+      {/* Main Map Container - Bỏ transition để tăng FPS tuyệt đối */}
+      <div className="fixed inset-0 pt-16">
         <div ref={containerRef} className="h-full w-full" />
       </div>
 
@@ -1909,6 +2150,96 @@ export function BuildingStructureDemo() {
 
       {/* Loading Overlay */}
       {isLoadingEnv && <LoadingOverlay />}
+
+      {/* AI Chatbot - Luôn mount để giữ lịch sử chat */}
+      <div className={`fixed transition-all duration-300 z-40 ${isChatOpen ? "right-0" : "-right-[420px]"} top-16 bottom-0 w-[420px]`}>
+        <AIChatPanel
+          isOpen={isChatOpen}
+          onClose={() => setIsChatOpen(false)}
+          envData={envData}
+          buildingCount={featureCount + contextBuildings.length + (modelPlacementRef.current ? 1 : 0)}
+          mapCenter={mapCenter}
+          buildings={(() => {
+            const userBuildings = cachedDrawFeaturesRef.current.map((f) => ({
+              id: String(f.id ?? ""),
+              height: Number(f.properties?.height ?? 12),
+              floors: Number(f.properties?.floors ?? 4),
+              roofType: String(f.properties?.roofType ?? "flat"),
+              coordinates: (() => {
+                const geom = f.geometry;
+                if (geom.type === "Polygon" && geom.coordinates[0]?.[0]) {
+                  return geom.coordinates[0][0] as [number, number];
+                }
+                return undefined;
+              })(),
+            }));
+            const allBuildings = [...userBuildings, ...contextBuildings];
+            if (modelPlacementRef.current && importedModelRef.current) {
+              const bRadius = importedModelRef.current.userData.bRadius || 25;
+              const bHeight = importedModelRef.current.userData.bHeight || 60;
+              allBuildings.push({
+                id: modelFileName ? `Imported: ${modelFileName}` : "Imported Model 3D",
+                height: bHeight,
+                floors: Math.max(1, Math.floor(bHeight / 3)),
+                roofType: "custom 3D",
+                coordinates: [modelPlacementRef.current.lng, modelPlacementRef.current.lat]
+              });
+            }
+            return allBuildings;
+          })()}
+          autoPrompt={chatAutoPrompt}
+          onAutoPromptHandled={() => setChatAutoPrompt("")}
+          onAction={(action: ChatAction) => {
+            if (action.type === "set_wind") {
+              setShowWindSim(true);
+            }
+            if (action.type === "analyze") {
+              switchEnvTab("wind");
+            }
+          }}
+        />
+      </div>
+
+      {!isChatOpen && (
+        <div className="fixed right-2.5 top-[420px] z-40 flex flex-col gap-2">
+          {/* Day/Dusk/Night Toggle - Simplified for performance */}
+          <button
+            onClick={() => {
+              setLightMode((prev) => {
+                if (prev === "day") return "dusk";
+                if (prev === "dusk") return "night";
+                return "day";
+              });
+            }}
+            className="w-12 h-12 rounded-xl bg-[#0a0a0c]/80 backdrop-blur-xl border border-white/10 flex items-center justify-center shadow-xl hover:scale-105 hover:border-cyan-500/30 hover:bg-cyan-950/40 transition-all duration-200 group"
+            title={`Chế độ: ${lightMode}`}
+          >
+            {lightMode === "day" && <Sun className="w-5 h-5 text-amber-400 animate-in fade-in zoom-in duration-300" strokeWidth={2} />}
+            {lightMode === "dusk" && (
+              <div className="relative animate-in fade-in zoom-in duration-300">
+                <Sun className="w-5 h-5 text-orange-400 opacity-50" strokeWidth={2} />
+                <Moon className="w-4 h-4 text-orange-200 absolute -top-1 -right-1" strokeWidth={2} />
+              </div>
+            )}
+            {lightMode === "night" && <Moon className="w-5 h-5 text-cyan-400 animate-in fade-in zoom-in duration-300" strokeWidth={2} />}
+          </button>
+          
+          <AIChatTrigger onClick={() => setIsChatOpen(true)} />
+        </div>
+      )}
+
+      {/* Initial Loading Screen */}
+      {isInitialLoading && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black">
+          <div className="flex gap-2 mb-4">
+            <div className="w-3 h-3 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+            <div className="w-3 h-3 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+            <div className="w-3 h-3 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2 animate-pulse">{loadingMessages[loadingTextIndex]}</h2>
+          <p className="text-white/50 text-sm">Hệ thống đang khởi động GPU để ổn định khung hình...</p>
+        </div>
+      )}
     </section>
   );
 }

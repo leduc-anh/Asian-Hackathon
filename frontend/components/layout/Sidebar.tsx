@@ -68,10 +68,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      className={`fixed left-0 top-16 bottom-0 z-40 flex flex-col bg-black/95 border-r border-white/10 shadow-[18px_0_36px_rgba(0,0,0,0.45)] transition-all duration-500 cubic-bezier(0.4, 0, 0.2, 1) ${
+      className={`fixed left-0 top-16 bottom-0 z-40 flex flex-col bg-black/95 border-r border-white/10 shadow-[18px_0_36px_rgba(0,0,0,0.45)] ${
         isCollapsed ? "w-16" : "w-[300px]"
       }`}
     >
+      {/* Nút đóng/mở nhanh ở trên cùng */}
+      <div className="p-2 border-b border-white/5 flex justify-end">
+        <button
+          onClick={onToggleCollapse}
+          className={`p-2 rounded-lg bg-white/5 text-white/60 hover:text-white hover:bg-white/10 transition-all ${
+            isCollapsed ? "w-full flex justify-center" : ""
+          }`}
+          title={isCollapsed ? "Mở Menu" : "Đóng Menu"}
+        >
+          {isCollapsed ? (
+            <ChevronRight className="w-5 h-5" strokeWidth={1.6} />
+          ) : (
+            <ChevronLeft className="w-5 h-5" strokeWidth={1.6} />
+          )}
+        </button>
+      </div>
       <div className="flex-1 overflow-y-auto py-6 scrollbar-hide">
         <div className="px-3 space-y-6">
           {/* Project Info */}
