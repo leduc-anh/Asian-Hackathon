@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
@@ -256,7 +256,7 @@ export function BuildingStructureDemo() {
   // Pre-warm map animation to stabilize FPS
   useEffect(() => {
     if (!isInitialLoading || !mapRef.current) return;
-    
+
     // Khởi động nhẹ Mapbox để cache tiles và shaders
     const interval = setInterval(() => {
       if (mapRef.current) {
@@ -275,11 +275,11 @@ export function BuildingStructureDemo() {
   useEffect(() => {
     if (!mapRef.current) return;
     const map = mapRef.current;
-    
+
     try {
       // Sử dụng config property có sẵn của v3 Standard Style nhưng gọi một cách tối ưu
       map.setConfigProperty('basemap', 'lightPreset', lightMode);
-      
+
       // Bổ sung thêm Atmosphere (Bầu trời) mượt mà hơn bằng Globe & Fog mặc định
       map.setFog({
         'range': [0.8, 8],
@@ -508,12 +508,11 @@ export function BuildingStructureDemo() {
 
 
 
-  // Fetch env data from backend, then update map + particles
+  // Fetch env data from internal Next.js API (Serverless)
   const fetchEnvData = async (lat: number, lng: number) => {
     setIsLoadingEnv(true);
     try {
-      const base = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
-      const res = await fetch(`${base}/api/env/current?lat=${lat}&lng=${lng}`);
+      const res = await fetch(`/api/env?lat=${lat}&lng=${lng}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: EnvData = await res.json();
       setEnvData(data);
@@ -527,9 +526,7 @@ export function BuildingStructureDemo() {
 
   // OWM tile key (free tier, covers all of Vietnam)
   const OWM_KEY =
-    process.env.NEXT_PUBLIC_OPENWEATHERMAP_KEY ??
-    "ce6c5aeeba2c0ced069fb23e43e38a56";
-
+    process.env.NEXT_PUBLIC_OPENWEATHERMAP_KEY
   const OWM_LAYERS: Record<
     EnvTab,
     { sourceId: string; layerId: string; tile: string }
@@ -769,7 +766,7 @@ export function BuildingStructureDemo() {
             type: "Feature"
           });
         }
-        
+
         return results;
       },
     });
@@ -1148,16 +1145,16 @@ export function BuildingStructureDemo() {
             const mapCenterForWind = map.getCenter();
             const windCenterMercForPhysics = modelPlacementRef.current
               ? mapboxgl.MercatorCoordinate.fromLngLat(
-                  [
-                    modelPlacementRef.current.lng,
-                    modelPlacementRef.current.lat,
-                  ],
-                  modelPlacementRef.current.altitude,
-                )
+                [
+                  modelPlacementRef.current.lng,
+                  modelPlacementRef.current.lat,
+                ],
+                modelPlacementRef.current.altitude,
+              )
               : mapboxgl.MercatorCoordinate.fromLngLat(
-                  windAnchorRef.current || map.getCenter(),
-                  0,
-                );
+                windAnchorRef.current || map.getCenter(),
+                0,
+              );
             const physicsScale =
               windCenterMercForPhysics.meterInMercatorCoordinateUnits() *
               (modelPlacementRef.current
@@ -1189,49 +1186,49 @@ export function BuildingStructureDemo() {
             // Add Drawn Buildings
             const features = cachedDrawFeaturesRef.current;
             for (const feat of features) {
-                if (feat.geometry.type === "Polygon") {
-                  const coords = feat.geometry.coordinates[0];
-                  if (!coords || coords.length === 0) continue;
+              if (feat.geometry.type === "Polygon") {
+                const coords = feat.geometry.coordinates[0];
+                if (!coords || coords.length === 0) continue;
 
-                  let avgLng = 0,
-                    avgLat = 0;
-                  let validCount = 0;
-                  for (const c of coords) {
-                    if (
-                      Array.isArray(c) &&
-                      typeof c[0] === "number" &&
-                      typeof c[1] === "number"
-                    ) {
-                      avgLng += c[0];
-                      avgLat += c[1];
-                      validCount++;
-                    }
+                let avgLng = 0,
+                  avgLat = 0;
+                let validCount = 0;
+                for (const c of coords) {
+                  if (
+                    Array.isArray(c) &&
+                    typeof c[0] === "number" &&
+                    typeof c[1] === "number"
+                  ) {
+                    avgLng += c[0];
+                    avgLat += c[1];
+                    validCount++;
                   }
-                  if (validCount === 0) continue;
-
-                  avgLng /= validCount;
-                  avgLat /= validCount;
-
-                  const obsMerc = mapboxgl.MercatorCoordinate.fromLngLat([
-                    avgLng,
-                    avgLat,
-                  ]);
-                  const ox =
-                    (obsMerc.x - windCenterMercForPhysics.x) / physicsScale;
-                  const oz =
-                    (obsMerc.y - windCenterMercForPhysics.y) / physicsScale;
-
-                  const v0 = mapboxgl.MercatorCoordinate.fromLngLat(
-                    coords[0] as [number, number],
-                  );
-                  const dist =
-                    Math.sqrt(
-                      (v0.x - obsMerc.x) ** 2 + (v0.y - obsMerc.y) ** 2,
-                    ) / physicsScale;
-                  const h = feat.properties?.height ?? 24;
-                  obstacles.push({ x: ox, z: oz, r: (dist + 5) * 1.5, h: h });
                 }
+                if (validCount === 0) continue;
+
+                avgLng /= validCount;
+                avgLat /= validCount;
+
+                const obsMerc = mapboxgl.MercatorCoordinate.fromLngLat([
+                  avgLng,
+                  avgLat,
+                ]);
+                const ox =
+                  (obsMerc.x - windCenterMercForPhysics.x) / physicsScale;
+                const oz =
+                  (obsMerc.y - windCenterMercForPhysics.y) / physicsScale;
+
+                const v0 = mapboxgl.MercatorCoordinate.fromLngLat(
+                  coords[0] as [number, number],
+                );
+                const dist =
+                  Math.sqrt(
+                    (v0.x - obsMerc.x) ** 2 + (v0.y - obsMerc.y) ** 2,
+                  ) / physicsScale;
+                const h = feat.properties?.height ?? 24;
+                obstacles.push({ x: ox, z: oz, r: (dist + 5) * 1.5, h: h });
               }
+            }
 
             const shouldShow = showWindSimRef.current && obstacles.length > 0;
 
@@ -1249,13 +1246,13 @@ export function BuildingStructureDemo() {
 
               const trailPosAttr = wTrail
                 ? (wTrail.geometry.getAttribute(
-                    "position",
-                  ) as THREE.BufferAttribute)
+                  "position",
+                ) as THREE.BufferAttribute)
                 : null;
               const trailColorAttr = wTrail
                 ? (wTrail.geometry.getAttribute(
-                    "color",
-                  ) as THREE.BufferAttribute)
+                  "color",
+                ) as THREE.BufferAttribute)
                 : null;
               const trailSegmentCount = 7;
 
@@ -1488,7 +1485,7 @@ export function BuildingStructureDemo() {
                 wMesh.setMatrixAt(i, dummy.matrix);
 
                 // Color mapping: Cyan/Blue (tông màu đậm, sáng)
-                colorObj.setHSL(0.55 - speedRatio * 0.15, 1.0, 0.5); 
+                colorObj.setHSL(0.55 - speedRatio * 0.15, 1.0, 0.5);
                 wMesh.setColorAt(i, colorObj);
 
                 if (trailPosAttr && trailColorAttr) {
@@ -2226,7 +2223,7 @@ export function BuildingStructureDemo() {
             )}
             {lightMode === "night" && <Moon className="w-5 h-5 text-cyan-400 animate-in fade-in zoom-in duration-300" strokeWidth={2} />}
           </button>
-          
+
           <AIChatTrigger onClick={() => setIsChatOpen(true)} />
         </div>
       )}
