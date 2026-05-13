@@ -567,6 +567,7 @@ export function BuildingStructureDemo() {
           type: "raster",
           tiles: [cfg.tile],
           tileSize: 256,
+          maxzoom: 12, // Dừng gọi API khi zoom quá sâu, sử dụng cơ chế overzoom của Mapbox
           attribution: "\u00a9 OpenWeatherMap",
         });
       }

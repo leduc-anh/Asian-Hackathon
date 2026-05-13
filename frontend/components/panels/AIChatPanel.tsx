@@ -188,16 +188,16 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     // Buildings
     parts.push(`🏢 Tổng số tòa nhà trên bản đồ: ${buildingCount}`);
     if (buildings && buildings.length > 0) {
-      parts.push(`\n── Chi tiết tòa nhà ──`);
-      buildings.slice(0, 5).forEach((b, i) => {
+      parts.push(`\n── Chi tiết bối cảnh đô thị (Xung quanh) ──`);
+      buildings.slice(0, 15).forEach((b, i) => {
         parts.push(
           `  Tòa ${i + 1}: cao ${b.height}m, ${b.floors} tầng, mái ${b.roofType}${
             b.coordinates ? `, tọa độ [${b.coordinates[0].toFixed(5)}, ${b.coordinates[1].toFixed(5)}]` : ""
           }`
         );
       });
-      if (buildings.length > 5) {
-        parts.push(`  ... và ${buildings.length - 5} tòa nhà khác.`);
+      if (buildings.length > 15) {
+        parts.push(`  ... và ${buildings.length - 15} tòa nhà khác trong khu vực.`);
       }
     }
 
