@@ -297,12 +297,22 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
           )
         );
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Chat error:", err);
+      let errorMessage = "⚠️ Không thể kết nối với AI Assistant. Vui lòng kiểm tra lại kết nối mạng hoặc cấu hình API Key trong Vercel.";
+      
+      // Nếu có thể lấy được nội dung lỗi từ response (khi res.ok === false)
+      if (err.message && err.message.includes("API error")) {
+        try {
+          // Thử lấy thêm thông tin nếu cần, nhưng đơn giản nhất là hiển thị lỗi từ console hoặc một thông báo chi tiết hơn
+          errorMessage = `⚠️ Lỗi hệ thống: ${err.message}. Kiểm tra Vercel Logs để biết chi tiết.`;
+        } catch (e) {}
+      }
+
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantMsgId 
-            ? { ...m, content: "⚠️ Không thể kết nối với AI Assistant. Vui lòng kiểm tra lại kết nối mạng hoặc cấu hình API Key trong Vercel/Environment Variables." } 
+            ? { ...m, content: errorMessage } 
             : m
         )
       );

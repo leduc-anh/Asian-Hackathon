@@ -4,7 +4,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const lat = searchParams.get("lat");
   const lng = searchParams.get("lng");
-  const apiKey = process.env.OPENWEATHER_API_KEY;
+  const apiKey = process.env.OPENWEATHER_API_KEY || process.env.NEXT_PUBLIC_OPENWEATHERMAP_KEY;
 
   if (!apiKey) {
     // Nếu chưa có Key, trả về dữ liệu mẫu để demo không bị lỗi

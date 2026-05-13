@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
@@ -525,8 +525,7 @@ export function BuildingStructureDemo() {
   };
 
   // OWM tile key (free tier, covers all of Vietnam)
-  const OWM_KEY =
-    process.env.NEXT_PUBLIC_OPENWEATHERMAP_KEY
+  const OWM_KEY = process.env.NEXT_PUBLIC_OPENWEATHERMAP_KEY || "ce6c5aeeba2c0ced069fb23e43e38a56";
   const OWM_LAYERS: Record<
     EnvTab,
     { sourceId: string; layerId: string; tile: string }
