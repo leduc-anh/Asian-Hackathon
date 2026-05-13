@@ -58,7 +58,12 @@ export async function POST(req: NextRequest) {
     });
 
     if (!response.ok) {
-      return NextResponse.json({ content: "⚠️ API error" }, { status: 500 });
+      const errorData = await response.json().catch(() => ({}));
+      console.error("Groq/AI Provider Error:", errorData);
+      return NextResponse.json(
+        { content: `⚠️ AI Provider Error: ${response.status} ${errorData.error?.message || response.statusText}` },
+        { status: response.status }
+      );
     }
 
     // Chuyển tiếp stream từ Ollama về Frontend

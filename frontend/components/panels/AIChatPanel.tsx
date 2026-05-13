@@ -302,7 +302,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantMsgId 
-            ? { ...m, content: "⚠️ Không thể kết nối AI (Ollama). Hãy đảm bảo bạn đã chạy `docker-compose up -d`." } 
+            ? { ...m, content: "⚠️ Không thể kết nối với AI Assistant. Vui lòng kiểm tra lại kết nối mạng hoặc cấu hình API Key trong Vercel/Environment Variables." } 
             : m
         )
       );
