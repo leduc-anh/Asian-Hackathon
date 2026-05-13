@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Cấu hình AI Backend - Ưu tiên Groq (Free & Siêu nhanh) hoặc Ollama Local
 const AI_URL = process.env.AI_API_URL || "https://api.groq.com/openai/v1/chat/completions";
-const AI_MODEL = process.env.AI_MODEL || "llama3-70b-8192";
+const AI_MODEL = process.env.AI_MODEL || "llama-3.3-70b-versatile";
 const AI_KEY = process.env.AI_API_KEY || "";
 
 const SYSTEM_INSTRUCTION = `BẮT BUỘC: PHẢI TRẢ LỜI BẰNG TIẾNG VIỆT TRONG MỌI TRƯỜNG HỢP. TUYỆT ĐỐI KHÔNG DÙNG TIẾNG ANH.
